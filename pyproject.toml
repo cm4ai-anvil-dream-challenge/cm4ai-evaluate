@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cm4ai-evaluate"
+version = "0.1.0.dev0"
+description = "Score predicted protein localization images against ground truth for the CM4AI DREAM Challenge"
+readme = "README.md"
+requires-python = ">=3.10"
+# Core dependencies: enough for the input checks and the nine statistics.
+dependencies = [
+    "numpy>=1.26,<3",
+    "Pillow>=10",
+    "tifffile>=2023.1",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+# Metrics ported from the ProtiCelli notebook (MS-SSIM, mutual information,
+# Haralick, Gabor). Inception L2 additionally needs torch, kept separate
+# because it is a large install.
+extended = [
+    "scikit-image>=0.21",
+    "scikit-learn>=1.3",
+]
+inception = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+cm4ai-evaluate = "cm4ai_evaluate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
