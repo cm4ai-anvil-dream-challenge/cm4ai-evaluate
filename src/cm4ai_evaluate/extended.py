@@ -20,6 +20,9 @@ Changes from the notebook, all deliberate:
 - PSNR of identical images is infinite; it is returned as math.inf with a
   note, and the output layer decides how to write it.
 - The device for Inception adds Apple MPS to the notebook's CUDA or CPU.
+- Gabor responses are computed with Fourier transforms rather than direct
+  convolution (faster; same values to floating point rounding).
+- Inception runs images through the network in batches.
 - Mutual information omits the notebook's per-image rescaling of values
   above 1, which cannot occur on [0, 1] inputs.
 
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from scipy import stats
@@ -218,22 +222,64 @@ GABOR_FREQUENCIES = (0.1, 0.3, 0.5)
 GABOR_ANGLES_DEGREES = (0, 45, 90, 135)
 
 
-def gabor_magnitudes(image: np.ndarray) -> list[np.ndarray]:
-    """Gabor filter response magnitudes at 3 frequencies x 4 orientations."""
-    from skimage import filters
+GABOR_SIGMA = 2
 
-    responses = []
-    for frequency in GABOR_FREQUENCIES:
-        for angle in GABOR_ANGLES_DEGREES:
-            real, imag = filters.gabor(
-                _as_float(image),
-                frequency=frequency,
-                theta=np.deg2rad(angle),
-                sigma_x=2,
-                sigma_y=2,
-            )
-            responses.append(np.sqrt(real**2 + imag**2))
-    return responses
+
+@lru_cache(maxsize=None)
+def _gabor_kernels() -> tuple[np.ndarray, ...]:
+    """The 12 complex kernels skimage.filters.gabor builds for these settings."""
+    from skimage.filters import gabor_kernel
+
+    return tuple(
+        gabor_kernel(
+            frequency,
+            theta=np.deg2rad(angle),
+            sigma_x=GABOR_SIGMA,
+            sigma_y=GABOR_SIGMA,
+            dtype=np.complex128,
+        )
+        for frequency in GABOR_FREQUENCIES
+        for angle in GABOR_ANGLES_DEGREES
+    )
+
+
+@lru_cache(maxsize=8)
+def _gabor_kernel_spectra(padded_shape: tuple[int, int]) -> tuple[np.ndarray, ...]:
+    """Fourier transforms of the kernels, centred at the origin, for one image size."""
+    from scipy import fft
+
+    spectra = []
+    for kernel in _gabor_kernels():
+        ry, rx = kernel.shape[0] // 2, kernel.shape[1] // 2
+        placed = np.zeros(padded_shape, dtype=np.complex128)
+        placed[: kernel.shape[0], : kernel.shape[1]] = kernel
+        placed = np.roll(placed, (-ry, -rx), axis=(0, 1))
+        spectra.append(fft.fft2(placed))
+    return tuple(spectra)
+
+
+def gabor_magnitudes(image: np.ndarray) -> list[np.ndarray]:
+    """Gabor filter response magnitudes at 3 frequencies x 4 orientations.
+
+    Equivalent to the notebook's calls to skimage.filters.gabor (direct
+    convolution with mode "reflect"), computed with Fourier transforms for
+    speed: the image is padded by symmetric reflection, which is the same
+    boundary rule, transformed once, and multiplied by each kernel's
+    transform. Results agree with the direct method to floating point
+    rounding (see tests/test_extended.py).
+    """
+    from scipy import fft
+
+    values = _as_float(image)
+    pad = max(max(k.shape) for k in _gabor_kernels()) // 2
+    padded = np.pad(values, pad, mode="symmetric")
+    spectrum = fft.fft2(padded)
+    height, width = values.shape
+    magnitudes = []
+    for kernel_spectrum in _gabor_kernel_spectra(padded.shape):
+        response = fft.ifft2(spectrum * kernel_spectrum)[pad : pad + height, pad : pad + width]
+        magnitudes.append(np.abs(response))
+    return magnitudes
 
 
 def gabor_similarity(prediction: np.ndarray, ground_truth: np.ndarray) -> MetricResult:
@@ -289,15 +335,30 @@ class InceptionFeatureExtractor:
             ]
         )
 
-    def extract(self, image: np.ndarray) -> np.ndarray:
-        """image: [0, 1] floats. Grey replicated to three channels, as in the notebook."""
+    def _prepare(self, image: np.ndarray):
+        as_uint8 = (np.clip(_as_float(image), 0, 1) * 255).astype(np.uint8)
+        rgb = np.stack([as_uint8] * 3, axis=-1)  # grey replicated to three channels
+        return self.preprocess(rgb)
+
+    def extract_many(self, images: list[np.ndarray], batch_size: int = 8) -> np.ndarray:
+        """Features for several [0, 1] images, run through the network in batches.
+
+        Returns an array of shape (number of images, 2048). In eval mode the
+        network treats each image independently, so batching changes speed,
+        not results (beyond GPU floating point rounding).
+        """
         import torch
 
-        as_uint8 = (np.clip(_as_float(image), 0, 1) * 255).astype(np.uint8)
-        rgb = np.stack([as_uint8] * 3, axis=-1)
+        features = []
         with torch.no_grad():
-            batch = self.preprocess(rgb).unsqueeze(0).to(self.device)
-            return self.model(batch).cpu().numpy().ravel()
+            for start in range(0, len(images), batch_size):
+                batch = torch.stack([self._prepare(im) for im in images[start : start + batch_size]])
+                features.append(self.model(batch.to(self.device)).cpu().numpy())
+        return np.concatenate(features, axis=0)
+
+    def extract(self, image: np.ndarray) -> np.ndarray:
+        """Features for one [0, 1] image, as in the notebook."""
+        return self.extract_many([image])[0]
 
 
 def inception_l2(
@@ -308,8 +369,8 @@ def inception_l2(
     Lower is better. Not FID itself, which compares distributions across a
     whole set of images.
     """
-    distance = np.linalg.norm(extractor.extract(ground_truth) - extractor.extract(prediction))
-    return MetricResult(float(distance))
+    truth_features, prediction_features = extractor.extract_many([ground_truth, prediction])
+    return MetricResult(float(np.linalg.norm(truth_features - prediction_features)))
 
 
 # Names used in outputs, in report order.

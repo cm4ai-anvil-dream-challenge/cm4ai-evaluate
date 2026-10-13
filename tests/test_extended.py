@@ -137,3 +137,32 @@ def test_inception_identical_and_different(cell_like):
     extractor = ex.InceptionFeatureExtractor()
     assert ex.inception_l2(image, image, extractor).value == pytest.approx(0.0, abs=1e-3)
     assert ex.inception_l2(noisy, image, extractor).value > 1.0
+
+
+# Speed-ups match the notebook's direct methods
+
+
+def test_gabor_fft_matches_skimage_direct(cell_like):
+    from skimage import filters
+
+    image, _ = cell_like
+    rng = np.random.default_rng(4)
+    for img in (image, rng.random((512, 512)), rng.random((37, 61))):
+        fast = ex.gabor_magnitudes(img)
+        k = 0
+        for frequency in ex.GABOR_FREQUENCIES:
+            for angle in ex.GABOR_ANGLES_DEGREES:
+                real, imag = filters.gabor(img, frequency=frequency, theta=np.deg2rad(angle),
+                                           sigma_x=2, sigma_y=2)
+                np.testing.assert_allclose(fast[k], np.sqrt(real**2 + imag**2), rtol=0, atol=1e-10)
+                k += 1
+
+
+def test_inception_batch_matches_single(cell_like):
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    image, noisy = cell_like
+    extractor = ex.InceptionFeatureExtractor()
+    batched = extractor.extract_many([image, noisy, image[::-1]], batch_size=2)
+    for i, single in enumerate([image, noisy, image[::-1]]):
+        np.testing.assert_allclose(batched[i], extractor.extract(single), rtol=1e-4, atol=1e-4)
