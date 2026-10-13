@@ -9,10 +9,12 @@ def test_modes():
 
 def test_nine_statistics():
     assert len(statistics.STATISTIC_NAMES) == 9
+    assert "ground_truth_square_sum" in statistics.STATISTIC_NAMES
 
 
 def test_manifest_columns():
-    assert manifest.REQUIRED_COLUMNS == ("sample_id", "prediction", "ground_truth")
+    assert manifest.REQUIRED_COLUMNS == ("prediction", "ground_truth")
+    assert manifest.OPTIONAL_COLUMNS == ("prediction_id", "mask")
 
 
 def test_cli_help(capsys):
