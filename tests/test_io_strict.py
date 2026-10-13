@@ -125,9 +125,9 @@ def test_unknown_role(tmp_path):
         io.read_image(save_png(tmp_path / "a.png", gradient()), "target")
 
 
-def test_lenient_not_yet(tmp_path):
-    with pytest.raises(NotImplementedError):
-        io.read_image(save_png(tmp_path / "a.png", gradient()), io.PREDICTION, mode="lenient")
+def test_unknown_mode(tmp_path):
+    with pytest.raises(ValueError):
+        io.read_image(save_png(tmp_path / "a.png", gradient()), io.PREDICTION, mode="loose")
 
 
 # Pair check

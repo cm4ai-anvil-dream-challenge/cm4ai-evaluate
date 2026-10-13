@@ -20,6 +20,8 @@ Changes from the notebook, all deliberate:
 - PSNR of identical images is infinite; it is returned as math.inf with a
   note, and the output layer decides how to write it.
 - The device for Inception adds Apple MPS to the notebook's CUDA or CPU.
+- Mutual information omits the notebook's per-image rescaling of values
+  above 1, which cannot occur on [0, 1] inputs.
 
 Pearson, Spearman and PSNR need only the core
 dependencies. MS-SSIM, mutual information, Haralick and Gabor use the
@@ -164,12 +166,8 @@ def mutual_information_nats(
     r, p = _as_float(ground_truth).ravel(), _as_float(prediction).ravel()
     if np.all(r == r[0]) or np.all(p == p[0]):
         return MetricResult(0.0, "zero: a constant image carries no information")
-    # The notebook rescales by the image maximum when values exceed 1. Inputs
-    # here are already on [0, 1], so this never triggers; kept for fidelity.
-    if r.max() > 1.0:
-        r = r / r.max()
-    if p.max() > 1.0:
-        p = p / p.max()
+    # The notebook also rescaled each image by its own maximum when values
+    # exceeded 1. Inputs here are always on [0, 1], so that step is omitted.
     edges = np.linspace(0, 1, bins)
     r_bin = np.clip(np.digitize(r, edges) - 1, 0, bins - 1)
     p_bin = np.clip(np.digitize(p, edges) - 1, 0, bins - 1)
