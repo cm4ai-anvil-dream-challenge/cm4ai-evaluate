@@ -16,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "manifest",
-        help="CSV or JSON manifest with sample_id, prediction, ground_truth and optional mask",
+        help="CSV or JSON manifest: prediction, ground_truth, optional prediction_id and mask",
     )
     parser.add_argument(
         "--mode",
