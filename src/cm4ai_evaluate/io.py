@@ -225,7 +225,7 @@ def _decode_lenient(source: Path, role: str) -> tuple[np.ndarray, list[Deviation
                 deviations.append(Deviation("palette", "palette PNG expanded through its colour table"))
             elif image.mode == "1":
                 raise ImageCheckError(
-                    role, "one_bit", f"1-bit image has no intensity range: {source.name}"
+                    role, "one_bit", f"1-bit image has no intensity range (is this a mask?): {source.name}"
                 )
             pixels = np.asarray(image)
     except ImageCheckError:
