@@ -1,0 +1,20 @@
+[
+  {
+    "prediction_id": "cell_001",
+    "prediction": "predictions/cell_001.png",
+    "ground_truth": "ground_truth/cell_001_protein.png",
+    "mask": "masks/cell_001_mask.png"
+  },
+  {
+    "prediction_id": "cell_002",
+    "prediction": "predictions/cell_002.png",
+    "ground_truth": "ground_truth/cell_002_protein.png",
+    "mask": "masks/cell_002_mask.png"
+  },
+  {
+    "prediction_id": "cell_003",
+    "prediction": "predictions/cell_003.png",
+    "ground_truth": "ground_truth/cell_003_protein.png",
+    "mask": null
+  }
+]

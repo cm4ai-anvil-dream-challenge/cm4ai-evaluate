@@ -81,3 +81,17 @@ def test_errors(tmp_path, name, text, message):
 def test_missing_manifest(tmp_path):
     with pytest.raises(ManifestError):
         read_manifest(tmp_path / "nope.csv")
+
+
+TEMPLATES = Path(__file__).resolve().parents[1] / "examples"
+
+
+def test_templates_parse_and_agree():
+    csv_rows = read_manifest(TEMPLATES / "manifest_template.csv").rows
+    json_rows = read_manifest(TEMPLATES / "manifest_template.json").rows
+    assert len(csv_rows) == 3
+    for a, b in zip(csv_rows, json_rows):
+        assert (a.prediction_id, a.prediction, a.ground_truth, a.mask) == (
+            b.prediction_id, b.prediction, b.ground_truth, b.mask
+        )
+    assert csv_rows[2].mask is None

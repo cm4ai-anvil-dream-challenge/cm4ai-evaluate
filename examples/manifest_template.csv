@@ -1,0 +1,4 @@
+prediction_id,prediction,ground_truth,mask
+cell_001,predictions/cell_001.png,ground_truth/cell_001_protein.png,masks/cell_001_mask.png
+cell_002,predictions/cell_002.png,ground_truth/cell_002_protein.png,masks/cell_002_mask.png
+cell_003,predictions/cell_003.png,ground_truth/cell_003_protein.png,
