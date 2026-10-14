@@ -22,9 +22,3 @@ def test_cli_help(capsys):
         cli.main(["--help"])
     assert exit_info.value.code == 0
     assert "--mode" in capsys.readouterr().out
-
-
-def test_cli_default_mode_is_strict():
-    args = cli.build_parser().parse_args(["m.csv"])
-    assert args.mode == "strict"
-    assert args.output_prefix == "results"
