@@ -1,12 +1,65 @@
+# cm4ai-evaluate
 
-# CM4AI-AnVIL IF image generation evaluator
+Score predicted protein images against ground truth images for the CM4AI DREAM Challenge. A command-line tool for participants and organizers to run locally, for example on a locally trained model. Not the challenge's official grading, which runs on the organizers' side.
 
+**Status:** draft for review. None of the metrics is final; the evaluation team is still deciding which metrics the challenge will use and how to combine them. See [open issues](docs/open-issues.md).
 
+## Install
+
+Python 3.10 or later. From this folder, ideally in a new environment:
 
 ```
-python ./evaluate.py ./results/predictions ../test_data -o stats.json
+pip install -e ".[extended]"
 ```
 
+| Install | Packages |
+|---|---|
+| `pip install -e .` | the nine grading statistics, Pearson, Spearman, PSNR |
+| `pip install -e ".[extended]"` | adds MS-SSIM, mutual information, Haralick, Gabor |
+| `pip install -e ".[extended,inception]"` | adds Inception L2 (needs torch; downloads about 100 MB of model weights on first use) |
+| `pip install -e ".[extended,inception,dev]"` | add development tools |
 
-Notes: 
- - Because of upstream limitations, current version looks for .tiff predictions and .png truth files.
+
+## Quick start
+
+1. Make a manifest listing each prediction with its ground truth and, optionally, a cell mask. See the templates and column guide in [examples/](examples/).
+2. Run:
+
+   ```
+   cm4ai-evaluate manifest.csv -o results/run1
+   ```
+
+| Option | Meaning |
+|---|---|
+| `--mode strict` (default) | Inputs must meet the challenge image specification: PNG, 512 x 512, 8-bit grayscale |
+| `--mode lenient` | Accepts common departures (TIFF, 16-bit, other sizes and more) and records each one. See [input checks](docs/input-checks.md) |
+| `-o PREFIX` | Writes `PREFIX.jsonl` and `PREFIX.csv` (default `results`) |
+| `--inception` | Also computes Inception L2 |
+| `--device cpu\|cuda\|mps` | Device for Inception (default: whichever is available) |
+
+A row that fails a check is recorded with the reason and the run continues. Exit code 0 means every row was scored, 1 that some rows were not, 2 that the manifest or setup could not be used.
+
+## Outputs
+
+- **`PREFIX.csv`**, for people: one row per prediction, with every metric twice (`unmasked_` and `masked_` columns), deviations, notes and errors.
+- **`PREFIX.jsonl`**, for further analysis: one JSON record per prediction, shaped like the challenge grading rows (`prediction_id` plus a `metrics` object), with `masked_metrics`, `deviations`, `notes` and `error` alongside.
+
+## Metrics
+
+| Group | Metrics |
+|---|---|
+| Challenge grading statistics | absolute, squared and maximum error, mean absolute error, RMSE, cosine similarity, and the sums they come from |
+| Pixel correlation | Pearson, Spearman |
+| Image quality | PSNR, MS-SSIM |
+| Information and texture | mutual information, Haralick, Gabor |
+| Learned features | Inception L2 (optional) |
+
+Which direction is better for each, what each measures, how masks are applied, and where each comes from: [docs/metrics.md](docs/metrics.md). No single metric is enough; for example, dim images score well on error-based metrics whatever their pattern.
+
+
+## Documentation
+
+- [docs/metrics.md](docs/metrics.md): metric primer
+- [docs/input-checks.md](docs/input-checks.md): strict and lenient checks, masks
+- [docs/open-issues.md](docs/open-issues.md): questions for the evaluation team
+- [examples/](examples/): manifest templates
