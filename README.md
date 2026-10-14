@@ -12,11 +12,13 @@ Python 3.10 or later. From this folder, ideally in a new environment:
 pip install -e ".[extended]"
 ```
 
-| Install | Metrics |
+| Install | Packages |
 |---|---|
 | `pip install -e .` | the nine grading statistics, Pearson, Spearman, PSNR |
 | `pip install -e ".[extended]"` | adds MS-SSIM, mutual information, Haralick, Gabor |
 | `pip install -e ".[extended,inception]"` | adds Inception L2 (needs torch; downloads about 100 MB of model weights on first use) |
+| `pip install -e ".[extended,inception,dev]"` | add development tools |
+
 
 ## Quick start
 
@@ -54,18 +56,6 @@ A row that fails a check is recorded with the reason and the run continues. Exit
 
 Which direction is better for each, what each measures, how masks are applied, and where each comes from: [docs/metrics.md](docs/metrics.md). No single metric is enough; for example, dim images score well on error-based metrics whatever their pattern.
 
-## Verification
-
-- The grading statistics reimplement the challenge grader in `cm4ai-anvil-dream-tools` (cited by commit in the code) and give identical values on 203 image pairs.
-- The other metrics are ported from the ProtiCelli quality evaluation notebook and give identical values to its own functions on real image pairs.
-- Run on all 200 sample cells with BLAST-ProtiCelli predictions, masked and unmasked, with Inception.
-
-## Development
-
-```
-pip install -e ".[extended,inception,dev]"
-pytest
-```
 
 ## Documentation
 
