@@ -35,6 +35,7 @@ dependencies. MS-SSIM, mutual information, Haralick and Gabor use the
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -70,6 +71,10 @@ def _undefined_if_constant(prediction, ground_truth) -> MetricResult | None:
     if which is None:
         return None
     return MetricResult(None, f"undefined: {which} constant (every pixel the same value)")
+
+
+def _size_text(image: np.ndarray) -> str:
+    return " x ".join(str(n) for n in np.shape(image))
 
 
 def _as_float(image: np.ndarray) -> np.ndarray:
@@ -125,6 +130,11 @@ def ms_ssim(
     """
     from skimage.metrics import structural_similarity
 
+    if min(np.shape(ground_truth)) < win_size:
+        return MetricResult(
+            None, f"undefined: image region {_size_text(ground_truth)} is smaller than the "
+            f"{win_size} x {win_size} SSIM window"
+        )
     weights = np.array(MS_SSIM_WEIGHTS)
     img1, img2 = _as_float(ground_truth), _as_float(prediction)
     mcs, mssim = [], []
@@ -175,7 +185,12 @@ def mutual_information_nats(
     edges = np.linspace(0, 1, bins)
     r_bin = np.clip(np.digitize(r, edges) - 1, 0, bins - 1)
     p_bin = np.clip(np.digitize(p, edges) - 1, 0, bins - 1)
-    return MetricResult(float(mutual_info_score(r_bin, p_bin)))
+    with warnings.catch_warnings():
+        # scikit-learn warns when there are many distinct bins relative to the
+        # number of pixels (small masks); the labels here are bins, not classes.
+        warnings.simplefilter("ignore", UserWarning)
+        value = mutual_info_score(r_bin, p_bin)
+    return MetricResult(float(value))
 
 
 # Texture (notebook: haralick_similarity, gabor_similarity)
@@ -371,18 +386,3 @@ def inception_l2(
     """
     truth_features, prediction_features = extractor.extract_many([ground_truth, prediction])
     return MetricResult(float(np.linalg.norm(truth_features - prediction_features)))
-
-
-# Names used in outputs, in report order.
-CORE_METRICS = {
-    "pearson_r": pearson_r,
-    "spearman_r": spearman_r,
-    "psnr_db": psnr_db,
-}
-EXTENDED_METRICS = {
-    "ms_ssim": ms_ssim,
-    "mutual_information_nats": mutual_information_nats,
-    "haralick_similarity": haralick_similarity,
-    "gabor_similarity": gabor_similarity,
-}
-INCEPTION_METRIC = "inception_l2"
