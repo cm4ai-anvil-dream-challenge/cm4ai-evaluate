@@ -4,6 +4,9 @@ The real model's features were checked against dream_eval outside the test
 suite: identical on 32 sample images (docs/metrics.md, Provenance).
 """
 
+import gc
+import weakref
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -18,6 +21,7 @@ class FakeExtractor:
     """Features = a fixed projection of the masked image, so values are deterministic."""
 
     device = "fake"
+    batch = 8
 
     def __init__(self):
         self.calls = []
@@ -70,11 +74,86 @@ def test_subcell_values_and_energy(manifest):
     assert "reference channels" in by_id["c1-v0"]["notes"]["masked subcell_location_divergence"]
 
     # energy score: complete cell c0 gets a value equal to the math on its two predictions
+    truth = pm.unit_float32(np.asarray(Image.open(rows[0].ground_truth)))
+    mask = np.asarray(Image.open(rows[0].mask)) > 0
     feats = fake.features(
-        np.stack([cells["c0"].truth] + [pm.unit_float32(np.asarray(Image.open(r.prediction))) for r in rows[:2]]),
-        np.repeat(cells["c0"].mask[None], 3, 0),
+        np.stack([truth] + [pm.unit_float32(np.asarray(Image.open(r.prediction))) for r in rows[:2]]),
+        np.repeat(mask[None], 3, 0),
     )["protein"]
     assert values["c0"]["subcell_energy_score"] == pytest.approx(pm.energy_score(feats[1:], feats[0]))
     # c1 lost a prediction (file missing): incomplete, so no energy score
     assert not cells["c1"].complete
     assert np.isnan(values["c1"]["subcell_energy_score"])
+
+
+def test_cell_images_do_not_accumulate_across_cells(manifest, monkeypatch):
+    load = panel._load_cell
+    arrays = []
+    max_live_bytes = 0
+
+    def observed_load(cell, mode, want_references):
+        nonlocal max_live_bytes
+        gc.collect()
+        live_bytes = sum(ref().nbytes for ref in arrays if ref() is not None)
+        max_live_bytes = max(max_live_bytes, live_bytes)
+        images = load(cell, mode, want_references)
+        owner = images if images is not None else cell
+        arrays.extend(
+            weakref.ref(value)
+            for value in (getattr(owner, name, None) for name in ("truth", "mask", "references"))
+            if value is not None
+        )
+        gc.collect()
+        live_bytes = sum(ref().nbytes for ref in arrays if ref() is not None)
+        max_live_bytes = max(max_live_bytes, live_bytes)
+        return images
+
+    monkeypatch.setattr(panel, "_load_cell", observed_load)
+    rows = manifest.rows
+    records = [score_row(row, "strict", ()) for row in rows]
+    panel.score_panel(rows, records, "strict", (panel.PATTERN,), FakeExtractor(), say=lambda *_: None)
+
+    gc.collect()
+    live_bytes = sum(ref().nbytes for ref in arrays if ref() is not None)
+    one_cell_bytes = 512 * 512 * (np.dtype(np.float32).itemsize + np.dtype(bool).itemsize)
+    assert max_live_bytes <= one_cell_bytes
+    assert live_bytes == 0
+
+
+def test_energy_score_uses_each_cells_manifest_prediction_count(tmp_path):
+    mask = np.full((512, 512), 255, dtype=np.uint8)
+    Image.fromarray(mask).save(tmp_path / "mask.png")
+    lines = ["prediction_id,prediction,ground_truth,mask,cell_id"]
+    expected = {}
+    for count in (1, 2, 5):
+        cell_id = f"k{count}"
+        truth_name = f"{cell_id}-truth.png"
+        png(tmp_path / truth_name, count)
+        prediction_names = []
+        for index in range(count):
+            prediction_name = f"{cell_id}-p{index}.png"
+            png(tmp_path / prediction_name, 10 + count + index)
+            prediction_names.append(prediction_name)
+            lines.append(f"{cell_id}-v{index},{prediction_name},{truth_name},mask.png,{cell_id}")
+        expected[cell_id] = (truth_name, prediction_names)
+    manifest_path = tmp_path / "variable-k.csv"
+    manifest_path.write_text("\n".join(lines) + "\n")
+    manifest = read_manifest(manifest_path)
+    records = [score_row(row, "strict", ()) for row in manifest.rows]
+    fake = FakeExtractor()
+
+    cells, values = panel.score_panel(
+        manifest.rows, records, "strict", (panel.ENERGY,), fake, say=lambda *_: None
+    )
+
+    for cell_id, (truth_name, prediction_names) in expected.items():
+        assert cells[cell_id].complete
+        truth = pm.unit_float32(np.asarray(Image.open(tmp_path / truth_name)))
+        predictions = [pm.unit_float32(np.asarray(Image.open(tmp_path / name))) for name in prediction_names]
+        features = fake.features(
+            np.stack([truth, *predictions]),
+            np.repeat((mask > 0)[None], len(predictions) + 1, axis=0),
+        )["protein"]
+        assert values[cell_id][panel.ENERGY.name] == pytest.approx(
+            pm.energy_score(features[1:], features[0])
+        )

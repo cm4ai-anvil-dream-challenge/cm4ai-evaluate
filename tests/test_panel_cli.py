@@ -1,6 +1,7 @@
 """End to end with the panel metrics that need no extra packages."""
 
 import csv
+import json
 
 import numpy as np
 import pytest
@@ -108,3 +109,37 @@ def test_reference_columns_all_or_none(folder):
 def test_unknown_metric_exits_2(folder, capsys):
     write(folder, "prediction,ground_truth", [("p0.png", "g0.png")])
     assert cli.main([str(folder / "m.csv"), "-o", str(folder / "out" / "run"), "--metrics", "nope"]) == 2
+
+
+def test_lenient_tiny_image_keeps_pair_scores_and_reports_subcell_skip(folder, monkeypatch, capsys):
+    torch = pytest.importorskip("torch")
+    from cm4ai_evaluate import subcell
+
+    class TinyExtractor(subcell.SubCellExtractor):
+        def __init__(self, *args, **kwargs):
+            self.device = torch.device("cpu")
+            self.batch = 1
+            self.model = subcell.SubCellViT(d=24, depth=1, heads=3, patch=16, img=32, pool_int=16).eval()
+
+    monkeypatch.setattr(subcell, "SubCellExtractor", TinyExtractor)
+    Image.fromarray(np.arange(64, dtype=np.uint8).reshape(8, 8)).save(folder / "tiny-p.png")
+    Image.fromarray(np.flipud(np.arange(64, dtype=np.uint8).reshape(8, 8))).save(folder / "tiny-g.png")
+    Image.fromarray(np.full((8, 8), 255, dtype=np.uint8)).save(folder / "tiny-m.png")
+    manifest = write(
+        folder,
+        "prediction_id,prediction,ground_truth,mask",
+        [("tiny", "tiny-p.png", "tiny-g.png", "tiny-m.png")],
+    )
+
+    assert cli.main(
+        [str(manifest), "-o", str(folder / "out" / "tiny"), "--mode", "lenient", "--metrics", "basic,subcell"]
+    ) == 0
+    record = json.loads((folder / "out" / "tiny.jsonl").read_text())
+    assert record["status"] == "scored"
+    assert record["metrics"]["pearson_r"] is not None
+    assert record["masked_metrics"]["subcell_pattern_distance"] is None
+    assert "16" in record["notes"]["masked subcell_pattern_distance"]
+    assert "16" in record["notes"]["cell subcell_energy_score"]
+    assert table(folder / "out" / "tiny_cells.csv")[0]["subcell_energy_score"] == ""
+    err = capsys.readouterr().err
+    assert "SubCell" in err and "8 x 8" in err
