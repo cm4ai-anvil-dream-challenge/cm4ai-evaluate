@@ -214,6 +214,7 @@ def test_inception_needs_extractor(pair):
 
 def test_inception_masked_on_bounding_box(pair):
     pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
     extractor = ex.InceptionFeatureExtractor()
     results = scoring.score_pair(*pair, mask=cell_mask(), extractor=extractor)
     assert results["masked"]["inception_l2"].value > 0
