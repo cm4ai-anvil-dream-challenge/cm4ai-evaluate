@@ -15,6 +15,8 @@ Each prediction and ground truth image is checked before scoring. Prediction and
 | 512 x 512 | error | other sizes allowed, with a warning (`size`) |
 | 8-bit (uint8, 0 to 255) | error | 16-bit and other unsigned integers divided by their maximum, with a warning (`bit_depth`; plus `fits_12_bit` if a 16-bit image never exceeds 4,095, since it will appear dim); floats accepted only within [0, 1]; signed integers and booleans error |
 
+SubCell needs at least 16 pixels in each spatial dimension. In lenient mode, smaller images can still receive pair metrics and brightness spread. Their SubCell metrics are null, with a note explaining the size limit and a message in the run log. The tool does not resize them. A row's `status: scored` means its image checks passed, not that every requested metric has a value.
+
 ## Masks
 
 Masks are optional. A mask that fails a check never stops the run: the masked metrics for that row are skipped and `mask_skip_reason` says why.

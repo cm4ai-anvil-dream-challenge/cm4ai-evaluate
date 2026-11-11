@@ -28,6 +28,10 @@ inception = [
     "torch>=2.0",
     "torchvision>=0.15",
 ]
+# SubCell panel metrics; the 349 MB model weights are downloaded on first use.
+subcell = [
+    "torch>=2.0",
+]
 dev = [
     "pytest>=7",
     "ruff>=0.5",

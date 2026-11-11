@@ -8,3 +8,13 @@ Questions for the evaluation team, found while building and testing the tool. No
 - **Dim ground truth.** Error-based metrics (mean absolute error, RMSE, PSNR), MS-SSIM and Inception reward a dim prediction whatever its pattern. Example in [metrics.md](metrics.md#read-several-metrics-together): a prediction scored the best values on those metrics with almost no pattern agreement (Pearson 0.03). The BLAST-ProtiCelli reconstruction also returns very dim proteins somewhat too bright, which affects the same metrics.
 - **Masking raises cosine similarity for wrong proteins.** On 30 wrong-protein pairs, median cosine rose from 0.25 unmasked to 0.34 masked: inside the cell, almost any intensity pattern overlaps another.
 - **Multi-record FASTA files.** In the 200 sample cells, 6 FASTA files (57, 101, 113, 155, 159, 191) list 2 to 5 proteins for one antibody. A model predicting one protein is compared with staining that may come from several.
+
+## Panel metrics (2026-11-10)
+
+- **Minimum cells per protein.** A per-protein average needs a minimum number of cells to reflect performance. The number, and its source, are to be confirmed; `--min-cells` flags proteins below it.
+- **Location head.** `subcell_location_divergence` needs the evaluation team's location head, which is private and whose classes are undocumented. Can it be shared, and what was it trained on (if on test cells, sharing would leak test information)? A public alternative is SubCell's own classifier heads, which would not give the same values.
+- **Predictions per cell.** The mock test set asks for 4 predictions per cell, and the energy score carries the largest category weight in the preliminary panel. Is the number settled? It affects the training tutorial and BLAST-ProtiCelli.
+- **Brightness reference.** The challenge builds each cell's reference from the protein's other test cells that pass quality control; this tool uses the other cells in the manifest, all of them. With few cells per protein the reference is thin.
+- **Missing values.** In the challenge grading a missing panel value counts as the worst score; here it is left empty and leaves the average.
+- **Names.** This tool uses descriptive metric names; `docs/metrics.md` maps them to the panel's names.
+- **SubCell on a CPU.** The organizer grading refuses to run SubCell on a CPU. Participants without a GPU can still run it here, slowly, with 32-bit floats; values may differ slightly from the 16-bit GPU grading.

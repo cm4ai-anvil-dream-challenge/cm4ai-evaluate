@@ -23,6 +23,7 @@ from .statistics import STATISTIC_NAMES, compute_statistics
 CORE = "core"
 EXTENDED = "extended"
 INCEPTION = "inception"
+SUBCELL = "subcell"
 
 UNIT = "unit"  # [0, 1]
 RAW = "0_255"  # 0 to 255, as in the challenge grading
@@ -86,6 +87,7 @@ _EXTRA_MODULES = {
     CORE: (),
     EXTENDED: ("skimage", "sklearn"),
     INCEPTION: ("torch", "torchvision"),
+    SUBCELL: ("torch",),
 }
 
 

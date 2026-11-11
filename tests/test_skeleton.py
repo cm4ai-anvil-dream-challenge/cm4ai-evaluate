@@ -14,7 +14,8 @@ def test_nine_statistics():
 
 def test_manifest_columns():
     assert manifest.REQUIRED_COLUMNS == ("prediction", "ground_truth")
-    assert manifest.OPTIONAL_COLUMNS == ("prediction_id", "mask")
+    assert manifest.OPTIONAL_COLUMNS == ("prediction_id", "mask", "cell_id", "group_id")
+    assert manifest.REFERENCE_COLUMNS == ("nucleus", "microtubules", "er")
 
 
 def test_cli_help(capsys):

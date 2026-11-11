@@ -7,11 +7,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import __version__, scoring
+from . import __version__, panel, scoring
 from .io import MODES, STRICT
 from .manifest import ManifestError, read_manifest
-from .outputs import write_csv, write_jsonl
+from .outputs import cell_summary, group_summary, write_csv, write_jsonl, write_table
 from .runner import ERROR, score_row
+from .selection import SelectionError, resolve
 
 INSTALL_HINT = 'pip install "cm4ai-evaluate[{extra}]" (or pip install -e ".[{extra}]" in the repository folder)'
 
@@ -23,7 +24,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "manifest",
-        help="CSV or JSON manifest: prediction, ground_truth, optional prediction_id and mask",
+        help="CSV or JSON manifest: prediction, ground_truth; optional prediction_id, mask, "
+        "cell_id, group_id, nucleus, microtubules, er",
+    )
+    parser.add_argument(
+        "--metrics",
+        help="comma-separated tiers (basic, extended, subcell, inception, all) and metric names "
+        "(default: basic,extended)",
     )
     parser.add_argument(
         "--mode",
@@ -35,18 +42,33 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output-prefix",
         default="results",
-        help="writes <prefix>.jsonl (one record per image) and <prefix>.csv (default: results)",
+        help="writes <prefix>.jsonl and <prefix>.csv (one record per prediction), <prefix>_cells.csv, "
+        "and <prefix>_groups.csv when the manifest has group_id (default: results)",
     )
     parser.add_argument(
         "--inception",
         action="store_true",
-        help="also compute Inception L2 (needs the [inception] extra; downloads about 100 MB "
-        "of model weights on first use)",
+        help="also compute Inception L2 (same as adding inception to --metrics; downloads about "
+        "100 MB of model weights on first use)",
+    )
+    parser.add_argument(
+        "--subcell-weights",
+        help="SubCell weights file (default: downloaded once, 349 MB, to the user cache folder)",
+    )
+    parser.add_argument(
+        "--location-head",
+        help="location head (.npz: W, b, classes) for subcell_location_divergence; without it that "
+        "metric is skipped",
     )
     parser.add_argument(
         "--device",
         choices=("cpu", "cuda", "mps"),
-        help="device for Inception (default: cuda, then mps, then cpu, whichever is available)",
+        help="device for SubCell and Inception (default: cuda, then mps, then cpu, whichever is available)",
+    )
+    parser.add_argument(
+        "--min-cells",
+        type=int,
+        help="in <prefix>_groups.csv, flag groups with fewer complete cells than this",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -54,17 +76,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _say(message: str = "") -> None:
     print(message, file=sys.stderr)
-
-
-def _skipped_metrics(include_inception: bool) -> dict[str, list[str]]:
-    """Metrics left out because their extra is not installed, by extra."""
-    skipped: dict[str, list[str]] = {}
-    for metric in scoring.METRICS:
-        if metric.requires == scoring.INCEPTION and not include_inception:
-            continue
-        if not scoring.extra_installed(metric.requires):
-            skipped.setdefault(metric.requires, []).extend(metric.outputs)
-    return skipped
 
 
 def _summary(records: list[dict]) -> None:
@@ -90,6 +101,23 @@ def _summary(records: list[dict]) -> None:
         _say(f"  mask skipped ({count} row(s)): {code}")
 
 
+def _panel_requirements(chosen, manifest, location_head) -> tuple:
+    """Drop panel metrics whose inputs are absent, saying why."""
+    kept = []
+    for metric in chosen:
+        if panel.NEEDS_GROUP in metric.needs and not manifest.has_groups:
+            _say(f"Skipping {metric.name}: needs a group_id column (the other cells of each protein).")
+            continue
+        if panel.NEEDS_REFERENCES in metric.needs and not manifest.has_references:
+            _say(f"Skipping {metric.name}: needs the nucleus, microtubules and er columns.")
+            continue
+        if panel.NEEDS_HEAD in metric.needs and not location_head:
+            _say(f"Skipping {metric.name}: needs --location-head (not public at present).")
+            continue
+        kept.append(metric)
+    return tuple(kept)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -101,22 +129,42 @@ def main(argv: list[str] | None = None) -> int:
     if manifest.ignored_columns:
         _say(f"Ignoring manifest column(s): {', '.join(manifest.ignored_columns)}")
 
-    if args.inception and not scoring.extra_installed(scoring.INCEPTION):
-        _say("cm4ai-evaluate: --inception needs torch and torchvision.")
-        _say("  Install with: " + INSTALL_HINT.format(extra="inception"))
+    try:
+        selection = resolve(args.metrics, include_inception=args.inception)
+    except SelectionError as error:
+        _say(f"cm4ai-evaluate: {error}")
         return 2
-    for extra, names in _skipped_metrics(args.inception).items():
+    for extra, names in selection.missing.items():
+        if selection.explicit or extra == scoring.INCEPTION:
+            _say(f"cm4ai-evaluate: {', '.join(names)} need the [{extra}] packages.")
+            _say("  Install with: " + INSTALL_HINT.format(extra=extra))
+            return 2
         _say(f"Skipping {', '.join(names)}: the [{extra}] packages are not installed.")
         _say("  Install with: " + INSTALL_HINT.format(extra=extra))
-    metrics = scoring.available_metrics(include_inception=args.inception)
+    metrics = selection.pair
+    chosen_panel = _panel_requirements(selection.panel, manifest, args.location_head)
 
     extractor = None
-    if args.inception:
+    if any(m.requires == scoring.INCEPTION for m in metrics):
         from .extended import InceptionFeatureExtractor
 
         _say("Loading Inception (downloads model weights on first use)...")
         extractor = InceptionFeatureExtractor(device=args.device)
         _say(f"  on device {extractor.device}")
+
+    subcell_extractor = head = None
+    if any(m.requires == scoring.SUBCELL for m in chosen_panel):
+        from . import subcell
+
+        try:
+            if panel.LOCATION in chosen_panel:
+                head = subcell.load_location_head(args.location_head)
+            _say("Loading SubCell ...")
+            subcell_extractor = subcell.SubCellExtractor(args.subcell_weights, device=args.device, say=_say)
+        except (OSError, ValueError, KeyError) as error:
+            _say(f"cm4ai-evaluate: {error}")
+            return 2
+        _say(f"  on device {subcell_extractor.device}")
 
     rows = manifest.rows
     _say(f"Scoring {len(rows)} row(s) in {args.mode} mode.")
@@ -127,15 +175,35 @@ def main(argv: list[str] | None = None) -> int:
         if i % step == 0 or i == len(rows):
             _say(f"  {i}/{len(rows)}")
 
+    cells, cell_values = panel.score_panel(
+        rows, records, args.mode, chosen_panel, subcell_extractor, head, say=_say
+    )
+
     prefix = Path(args.output_prefix).expanduser()
     prefix.parent.mkdir(parents=True, exist_ok=True)
     jsonl_path = prefix.with_name(prefix.name + ".jsonl")
     csv_path = prefix.with_name(prefix.name + ".csv")
+    cells_path = prefix.with_name(prefix.name + "_cells.csv")
+    groups_path = prefix.with_name(prefix.name + "_groups.csv")
+    pair_names = scoring.output_names(metrics)
+    image_names = panel.image_level(chosen_panel)
+    cell_names = panel.cell_level(chosen_panel)
     write_jsonl(records, jsonl_path)
-    write_csv(records, scoring.output_names(metrics), csv_path)
+    write_csv(records, pair_names, csv_path, masked_only=image_names)
+    cell_rows = cell_summary(cells, cell_values, pair_names + image_names, cell_names)
+    write_table(cell_rows, cells_path)
+    written = [jsonl_path, csv_path, cells_path]
+    if manifest.has_groups:
+        groups = group_summary(
+            cell_rows, pair_names + image_names + cell_names, args.min_cells, tuple(image_names + cell_names)
+        )
+        write_table(groups, groups_path)
+        written.append(groups_path)
 
     _summary(records)
-    _say(f"Wrote {jsonl_path} and {csv_path}")
+    for metric in chosen_panel:
+        _say(f"  {metric.name}: category {metric.category}, one value per {metric.level}, lower is better")
+    _say("Wrote " + ", ".join(str(p) for p in written))
     return 1 if any(r["status"] == ERROR for r in records) else 0
 
 
