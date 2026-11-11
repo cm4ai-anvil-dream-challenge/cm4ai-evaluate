@@ -34,6 +34,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .io import ImageCheckError
+
 WEIGHTS_URL = "https://czi-subcell-public.s3.amazonaws.com/models/all_channels_MAE-CellS-ProtS-Pool.pth"
 WEIGHTS_SHA256 = "493ff6d17e108e89b805f79a17cf09c2f237458637ed847e3ae7d187295f387d"
 IMAGE_SIZE = 512
@@ -220,6 +222,13 @@ class SubCellExtractor:
         Returns {arm: [n, 1536] float32}; rows with an empty mask are nan."""
         protein = np.asarray(protein, np.float32)
         mask = np.asarray(mask, bool)
+        if protein.ndim != 3 or mask.shape != protein.shape:
+            raise ImageCheckError("SubCell", "shape", "protein and mask must have matching [n, height, width] shapes")
+        patch = self.model.patch
+        if min(protein.shape[1:]) < patch:
+            raise ImageCheckError("SubCell", "size", f"{protein.shape[1]} x {protein.shape[2]} image needs at least {patch} pixels per dimension")
+        if references is not None and np.shape(references) != (len(protein), 3, *protein.shape[1:]):
+            raise ImageCheckError("SubCell", "shape", "reference channels must have shape [n, 3, height, width]")
         if FULL in arms and references is None:
             raise ValueError("the full arm needs the reference channels")
         out = {a: [] for a in arms}

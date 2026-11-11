@@ -47,7 +47,7 @@ A row that fails a check is recorded with the reason and the run continues. Exit
 
 - **`PREFIX.csv`**, for people: one row per prediction, with every pair metric twice (`unmasked_` and `masked_` columns), panel metrics once (`masked_`), deviations, notes and errors.
 - **`PREFIX_cells.csv`**: one row per cell, with per-image metrics averaged over the cell's predictions and the per-cell metrics.
-- **`PREFIX_groups.csv`** (with `group_id`): one row per protein, averaged over its complete cells. Per-protein averages need enough cells to mean anything; see [three levels of assessment](docs/metrics.md#three-levels-of-assessment).
+- **`PREFIX_groups.csv`** (with `group_id`): one row per protein, averaged over its complete cells. Here `complete` means all predictions listed for a cell scored, not that all challenge-required versions were supplied or all metrics succeeded. The tool accepts variable numbers of predictions per cell. See [three levels of assessment](docs/metrics.md#three-levels-of-assessment).
 - **`PREFIX.jsonl`**, for further analysis: one JSON record per prediction, shaped like the challenge grading rows (`prediction_id` plus a `metrics` object), with `masked_metrics`, `deviations`, `notes` and `error` alongside.
 
 ## Metrics

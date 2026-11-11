@@ -15,7 +15,9 @@ None of these metrics is final. The evaluation team is still deciding which metr
 | Per cell | all predictions of one cell (the challenge asks for several per cell) | `PREFIX_cells.csv` | SubCell energy score; also every per-image metric averaged over the cell's predictions |
 | Per protein | all cells of one protein (`group_id`, usually the antibody) | `PREFIX_groups.csv` | every per-cell value averaged over the protein's complete cells |
 
-A cell is **complete** when all its predictions were scored. As in the challenge grading, a cell's average of a metric is empty when any of its predictions lacks that value, and a protein's averages use complete cells only. `PREFIX_groups.csv` also gives, for each panel metric, how many cells had a value (`<metric>_n_cells`).
+A cell's `complete` field is true when every prediction **listed for that cell in the manifest** has `status: scored`. The tool accepts a variable number of predictions per cell. It does not check whether you supplied every version required by the challenge, and `complete` does not mean that every requested metric has a value. Check `n_predictions`, `n_scored`, metric values, and notes together.
+
+A cell's average of a metric is empty when any listed prediction lacks that value. A protein's averages use complete cells with a value for that metric. `PREFIX_groups.csv` also gives, for each panel metric, how many cells had a value (`<metric>_n_cells`). These are local diagnostic summaries, not a check of submission completeness.
 
 Brightness spread is a per-image value but needs context: it compares a prediction with the other cells of the same protein.
 

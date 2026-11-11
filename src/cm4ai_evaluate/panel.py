@@ -75,14 +75,19 @@ class Cell:
     cell_id: str
     group_id: str | None
     rows: list  # (ManifestRow, record)
-    truth: np.ndarray | None = None  # float32 [0, 1]
-    mask: np.ndarray | None = None
-    references: np.ndarray | None = None  # [3, H, W] nucleus, microtubules, er
     problem: str | None = None
 
     @property
     def complete(self) -> bool:
+        """Every prediction listed for this cell scored, regardless of count."""
         return all(record["status"] == "scored" for _, record in self.rows)
+
+
+@dataclass
+class CellImages:
+    truth: np.ndarray
+    mask: np.ndarray
+    references: np.ndarray | None = None
 
 
 def build_cells(rows, records) -> dict[str, Cell]:
@@ -97,7 +102,7 @@ def _unit(image: io.LoadedImage) -> np.ndarray:
     return pm.unit_float32(image.pixels, image.max_value)
 
 
-def _load_cell(cell: Cell, mode: str, want_references: bool) -> None:
+def _load_cell(cell: Cell, mode: str, want_references: bool) -> CellImages | None:
     """Truth, mask and (if wanted) reference channels, from the cell's first row."""
     row = cell.rows[0][0]
     if row.mask is None:
@@ -112,15 +117,16 @@ def _load_cell(cell: Cell, mode: str, want_references: bool) -> None:
     if mask.mask is None:
         cell.problem = f"mask skipped: {mask.skip_reason}"
         return
-    cell.truth, cell.mask = _unit(truth), mask.mask
+    images = CellImages(_unit(truth), mask.mask)
     if want_references and row.references:
         try:
             channels = [io.read_image(row.references[c], io.GROUND_TRUTH, mode) for c in ("nucleus", "microtubules", "er")]
             if any(c.pixels.shape != truth.pixels.shape for c in channels):
                 raise io.ImageCheckError("reference", "shape", "reference channel size differs from the ground truth")
-            cell.references = np.stack([_unit(c) for c in channels])
+            images.references = np.stack([_unit(c) for c in channels])
         except io.ImageCheckError:
-            cell.references = None
+            images.references = None
+    return images
 
 
 def _set(record: dict, name: str, value: float, note: str | None = None) -> None:
@@ -145,14 +151,19 @@ def score_brightness(cells: dict[str, Cell], mode: str) -> None:
 
     Other cells are those with a different cell_id and a different ground truth file, so
     the reference never contains the cell's own image."""
-    truth_cdf = {
-        k: pm.brightness_cdf(c.truth, c.mask) if c.truth is not None else None for k, c in cells.items()
-    }
+    truth_cdf = {}
+    for key, cell in cells.items():
+        images = _load_cell(cell, mode, False)
+        truth_cdf[key] = pm.brightness_cdf(images.truth, images.mask) if images is not None else None
+        del images
     by_group = defaultdict(list)
     for k, c in cells.items():
         if c.group_id:
             by_group[c.group_id].append(k)
     for k, cell in cells.items():
+        images = _load_cell(cell, mode, False)
+        if images is None:
+            continue
         if not cell.group_id:
             reference, why = None, "no group_id for this row"
         else:
@@ -168,9 +179,27 @@ def score_brightness(cells: dict[str, Cell], mode: str) -> None:
             if reference is None:
                 _set(record, BRIGHTNESS.name, float("nan"), why)
                 continue
-            value = pm.brightness_spread_w1(_prediction(row, mode), cell.mask, reference)
+            value = pm.brightness_spread_w1(_prediction(row, mode), images.mask, reference)
             note = None if np.isfinite(value) else "prediction has no in-mask signal (99th percentile at or below 1/1020)"
             _set(record, BRIGHTNESS.name, value, note)
+        del images
+
+
+def _cell_features(images, rows, mode, extractor, arms):
+    batch = extractor.batch
+    chunks = {arm: [] for arm in arms}
+    for start in range(0, len(rows) + 1, batch):
+        stop = min(start + batch, len(rows) + 1)
+        protein = np.stack([
+            images.truth if i == 0 else _prediction(rows[i - 1][0], mode)
+            for i in range(start, stop)
+        ])
+        masks = np.repeat(images.mask[None], len(protein), axis=0)
+        refs = np.repeat(images.references[None], len(protein), axis=0) if "full" in arms else None
+        features = extractor.features(protein, masks, refs, arms=arms)
+        for arm in arms:
+            chunks[arm].append(features[arm])
+    return {arm: np.concatenate(values) for arm, values in chunks.items()}
 
 
 def score_subcell(cells, mode, chosen, extractor, head, say=print) -> dict[str, float]:
@@ -179,18 +208,35 @@ def score_subcell(cells, mode, chosen, extractor, head, say=print) -> dict[str, 
     want_energy = ENERGY in chosen
     arms = ("protein", "full") if want_location else ("protein",)
     energy: dict[str, float] = {}
-    todo = [c for c in cells.values() if c.truth is not None]
+    todo = list(cells.values())
     say(f"SubCell features for {len(todo)} cell(s) and their predictions on {extractor.device} ...")
     for n, cell in enumerate(todo, start=1):
-        use_full = want_location and cell.references is not None
-        cell_arms = arms if use_full else ("protein",)
+        images = _load_cell(cell, mode, want_location)
+        if images is None:
+            continue
         rows = [(row, record) for row, record in cell.rows if _usable(record)]
         if not rows:
+            del images
             continue
-        stack = [cell.truth] + [_prediction(row, mode) for row, _ in rows]
-        masks = np.repeat(cell.mask[None], len(stack), axis=0)
-        refs = np.repeat(cell.references[None], len(stack), axis=0) if use_full else None
-        features = extractor.features(np.stack(stack), masks, refs, arms=cell_arms)
+        use_full = want_location and images.references is not None
+        cell_arms = arms if use_full else ("protein",)
+        try:
+            features = _cell_features(images, rows, mode, extractor, cell_arms)
+        except io.ImageCheckError as error:
+            note = str(error)
+            for _, record in rows:
+                for metric in chosen:
+                    if metric.requires == SUBCELL:
+                        if metric.level == IMAGE:
+                            _set(record, metric.name, float("nan"), note)
+                        else:
+                            record["notes"][f"cell {metric.name}"] = note
+            if want_energy:
+                energy[cell.cell_id] = float("nan")
+            say(f"Skipping SubCell for cell {cell.cell_id}: {note}")
+            del images
+            continue
+        del images
         truth_protein = features["protein"][0]
         for i, (row, record) in enumerate(rows, start=1):
             if PATTERN in chosen:
@@ -216,9 +262,6 @@ def score_panel(rows, records, mode, chosen, extractor=None, head=None, say=prin
     cells = build_cells(rows, records)
     if not chosen:
         return cells, {}
-    want_references = LOCATION in chosen
-    for cell in cells.values():
-        _load_cell(cell, mode, want_references)
     if BRIGHTNESS in chosen:
         score_brightness(cells, mode)
     cell_values: dict[str, dict[str, float]] = defaultdict(dict)
