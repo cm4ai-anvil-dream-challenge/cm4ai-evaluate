@@ -59,8 +59,22 @@ Only `cli.py` imports `subcell.py` and `extended.InceptionFeatureExtractor`, and
 
 ## Tests
 
-`pytest` from the repository folder. Without torch, the SubCell model test and the Inception tests are skipped; the SubCell bookkeeping is tested with a stand-in extractor (`tests/test_panel_subcell.py`). To include the real SubCell model:
+Install with the development tools, then run `pytest` from the repository folder:
+
+```
+pip install -e ".[extended,inception,dev]"
+pytest
+```
+
+Without torch, the SubCell model test and the Inception tests are skipped; the SubCell bookkeeping is tested with a stand-in extractor (`tests/test_panel_subcell.py`). To include the real SubCell model:
 
 ```
 CM4AI_SUBCELL_WEIGHTS=/path/to/all_channels_MAE-CellS-ProtS-Pool.pth pytest
 ```
+
+## Verification
+
+- The grading statistics reimplement the challenge grader in `cm4ai-anvil-dream-tools` (cited by commit in the code) and give identical values on 203 image pairs.
+- The other metrics are ported from the ProtiCelli quality evaluation notebook and give identical values to its own functions on real image pairs.
+- The panel metrics reimplement the evaluation team's preliminary panel (`dream_eval` 0.3.0) and give identical values to its functions: brightness spread on 400 images; SubCell features, bit for bit, on 32 images.
+- Run on all 200 sample cells with BLAST-ProtiCelli predictions, masked and unmasked, with Inception.

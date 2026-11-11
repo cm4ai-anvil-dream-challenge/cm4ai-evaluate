@@ -12,12 +12,13 @@ Python 3.10 or later. From this folder, ideally in a new environment:
 pip install -e ".[extended]"
 ```
 
-| Install | Metrics |
+| Install | Packages |
 |---|---|
 | `pip install -e .` | the nine grading statistics, Pearson, Spearman, PSNR |
 | `pip install -e ".[extended]"` | adds MS-SSIM, mutual information, Haralick, Gabor |
 | `pip install -e ".[extended,subcell]"` | adds the SubCell panel metrics (needs torch; downloads 349 MB of model weights on first use; a GPU is much faster) |
 | `pip install -e ".[extended,inception]"` | adds Inception L2 (needs torch; downloads about 100 MB of model weights on first use) |
+| `pip install -e ".[extended,inception,dev]"` | add development tools |
 
 ## Quick start
 
@@ -61,20 +62,6 @@ A row that fails a check is recorded with the reason and the run continues. Exit
 | Preliminary challenge panel | brightness spread; SubCell pattern distance, location divergence, energy score (optional) |
 
 Each value is reported raw: the tool does not weight or combine metrics. Which direction is better for each, what each measures, how masks are applied, and where each comes from: [docs/metrics.md](docs/metrics.md). No single metric is enough; for example, dim images score well on error-based metrics whatever their pattern.
-
-## Verification
-
-- The grading statistics reimplement the challenge grader in `cm4ai-anvil-dream-tools` (cited by commit in the code) and give identical values on 203 image pairs.
-- The other metrics are ported from the ProtiCelli quality evaluation notebook and give identical values to its own functions on real image pairs.
-- The panel metrics reimplement the evaluation team's preliminary panel (`dream_eval` 0.3.0) and give identical values to its functions: brightness spread on 400 images; SubCell features, bit for bit, on 32 images.
-- Run on all 200 sample cells with BLAST-ProtiCelli predictions, masked and unmasked, with Inception.
-
-## Development
-
-```
-pip install -e ".[extended,inception,dev]"
-pytest
-```
 
 ## Documentation
 
