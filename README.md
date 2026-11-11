@@ -79,6 +79,7 @@ pytest
 ## Documentation
 
 - [docs/metrics.md](docs/metrics.md): metric primer
+- [docs/architecture.md](docs/architecture.md): how the code is organized, for developers
 - [docs/input-checks.md](docs/input-checks.md): strict and lenient checks, masks
 - [docs/open-issues.md](docs/open-issues.md): questions for the evaluation team
 - [examples/](examples/): manifest templates
